@@ -6,30 +6,37 @@ using System.Threading;
 
 namespace Myth.Net
 {
-    public class TCPClient : Singleton<TCPClient>
+    public class TCPClient
     {
         public Action<byte[]> OnReceived;
         public Action OnConnected;
         public Action OnDisConnected;
-
+        /// <summary>
+        /// 是否连接
+        /// </summary>
+        public bool IsConnected = false;
         private Socket sockClient = null;
         private Thread threadClient = null;
         private Thread initThread = null;
-
+        private System.Timers.Timer myTimer = new System.Timers.Timer(5000);
         private string ip = string.Empty;
         private int port = 0;
         private bool loop = true;
-        public TCPClient() { }
+
+        public TCPClient()
+        {
+            myTimer.Elapsed += new System.Timers.ElapsedEventHandler(TimeOut);
+        }
+
         public void Start(string ip, int port)
         {
             this.ip = ip;
             this.port = port;
-            initThread = new Thread(InitNetThread);
-            initThread.IsBackground = true;
+            initThread = new Thread(InitNet);
             initThread.Start();
         }
 
-        private void InitNetThread()
+        private void InitNet()
         {
             IPAddress ip = IPAddress.Parse(this.ip);
             IPEndPoint endPoint = new IPEndPoint(ip, this.port);
@@ -38,33 +45,33 @@ namespace Myth.Net
             {
                 sockClient.Connect(endPoint);
             }
-            catch (SocketException)
+            catch (Exception ex)
             {
-                System.Timers.Timer t = new System.Timers.Timer(5000);
-                t.Elapsed += new System.Timers.ElapsedEventHandler(TimeOut);
-                t.AutoReset = false;
-                t.Enabled = true;
-                if(OnDisConnected!=null)
+                myTimer.Start();
+                IsConnected = false;
+                if (OnDisConnected != null)
                 {
                     OnDisConnected.Invoke();
                 }
                 return;
             }
-
+            IsConnected = true;
             if (OnConnected != null)
             {
                 OnConnected.Invoke();
             }
             threadClient = new Thread(ProcessReceive);
-            threadClient.IsBackground = true;
+            threadClient.IsBackground = false;
             threadClient.Start();
+            myTimer.Stop();
         }
 
         private void TimeOut(object source, System.Timers.ElapsedEventArgs e)
         {
+            LoggerHelper.Instance.WriteLog("tcpclient:", "re-connected");
+            loop = true;
             CloseThread();
-            initThread = new Thread(InitNetThread);
-            initThread.IsBackground = true;
+            initThread = new Thread(InitNet);
             initThread.Start();
         }
 
@@ -72,46 +79,52 @@ namespace Myth.Net
         {
             while (loop)
             {
-                byte[] arrMsgRec = null;
                 try
                 {
-                    arrMsgRec = new byte[2048];
-                    sockClient.Receive(arrMsgRec);
+                    byte[] arrMsgRec = new byte[2048];
+                    int recNum=sockClient.Receive(arrMsgRec);
+                    if (OnReceived != null&& recNum>0)
+                    {
+                        OnReceived.Invoke(arrMsgRec);
+                    }
                 }
                 catch (Exception)
                 {
-                    Close();
-                    return;
-                }
-                if (OnReceived != null)
-                {
-                    OnReceived.Invoke(arrMsgRec);
+                    CloseClient();
+                    myTimer.Start();
                 }
             }
         }
+
+
         public void Send(byte[] data)
         {
-            if (sockClient != null&& sockClient.Connected)
+            if (sockClient != null && sockClient.Connected)
             {
                 sockClient.Send(data);
             }
         }
+
         public void Close()
         {
             CloseThread();
+            myTimer.Stop();
+            myTimer.Close();
+            CloseClient();
+        }
 
+        private void CloseClient()
+        {
             loop = false;
             if (threadClient != null)
             {
-                threadClient.IsBackground = false;
-                threadClient.Interrupt();
                 threadClient.Abort();
             }
             if (sockClient != null)
             {
+                sockClient.Shutdown(SocketShutdown.Both);
                 sockClient.Close();
             }
-            initThread = null;
             sockClient = null;
             threadClient = null;
         }
@@ -120,9 +133,9 @@ namespace Myth.Net
         {
             if (initThread != null)
             {
-                initThread.Interrupt();
                 initThread.Abort();
             }
+            initThread = null;
         }
     }
 }
