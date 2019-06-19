@@ -61,18 +61,21 @@ namespace Myth.Net
                 OnConnected.Invoke();
             }
             threadClient = new Thread(ProcessReceive);
-            threadClient.IsBackground = false;
             threadClient.Start();
             myTimer.Stop();
         }
 
         private void TimeOut(object source, System.Timers.ElapsedEventArgs e)
         {
-            LoggerHelper.Instance.WriteLog("tcpclient:", "re-connected");
             loop = true;
             CloseThread();
             initThread = new Thread(InitNet);
             initThread.Start();
+            //Dispatcher.Invoke(() =>
+            //{
+            //    LogHelper.WriteLog("TcpClient ", "re-connected");
+            //});
+            Console.WriteLine("re-connecting");
         }
 
         void ProcessReceive()
@@ -82,8 +85,8 @@ namespace Myth.Net
                 try
                 {
                     byte[] arrMsgRec = new byte[2048];
-                    int recNum=sockClient.Receive(arrMsgRec);
-                    if (OnReceived != null&& recNum>0)
+                    int recNum = sockClient.Receive(arrMsgRec);
+                    if (OnReceived != null && recNum > 0)
                     {
                         OnReceived.Invoke(arrMsgRec);
                     }
@@ -111,21 +114,28 @@ namespace Myth.Net
             myTimer.Stop();
             myTimer.Close();
             CloseClient();
+            sockClient = null;
         }
 
         private void CloseClient()
         {
             loop = false;
-            if (threadClient != null)
-            {
-                threadClient.Abort();
-            }
             if (sockClient != null)
             {
                 sockClient.Shutdown(SocketShutdown.Both);
                 sockClient.Close();
             }
-            sockClient = null;
+            try
+            {
+                if (threadClient != null)
+                {
+                    threadClient.Abort();
+                }
+            }
+            catch (ThreadAbortException ex)
+            {
+                
+            }
             threadClient = null;
         }
 
